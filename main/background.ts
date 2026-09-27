@@ -30,6 +30,10 @@ import {
   updateSettings,
   getSongs,
   getAlbumsWithDuration,
+  getEqSetting,
+  setEqSetting,
+  deleteEqSetting,
+  resolveEq,
 } from "./helpers/db/connectDB";
 import { initDatabase } from "./helpers/db/createDB";
 import { parseFile } from "music-metadata";
@@ -586,6 +590,52 @@ ipcMain.handle("updateLastFmSettings", async (_, data) => {
     return result;
   } catch (error) {
     console.error("Error in updateLastFmSettings:", error);
+    return false;
+  }
+});
+
+// ---- Equalizer (per-track / per-album) handlers ----
+
+// Resolve effective curve for a song (track override > album default > none)
+ipcMain.handle("resolveEq", async (_, data) => {
+  try {
+    return await resolveEq(data?.trackId, data?.albumKey);
+  } catch (error) {
+    console.error("Error in resolveEq:", error);
+    return { curve: null, source: "none" };
+  }
+});
+
+// Get a stored curve for scope+key
+ipcMain.handle("getEqSetting", async (_, data) => {
+  try {
+    return await getEqSetting(data?.scope, data?.key);
+  } catch (error) {
+    console.error("Error in getEqSetting:", error);
+    return null;
+  }
+});
+
+// Save/update a curve for scope+key
+ipcMain.handle("setEqSetting", async (_, data) => {
+  try {
+    const ok = await setEqSetting(data?.scope, data?.key, data?.curve);
+    if (mainWindow) mainWindow.webContents.send("eqSettingsChanged", data);
+    return ok;
+  } catch (error) {
+    console.error("Error in setEqSetting:", error);
+    return false;
+  }
+});
+
+// Remove a curve for scope+key
+ipcMain.handle("deleteEqSetting", async (_, data) => {
+  try {
+    const ok = await deleteEqSetting(data?.scope, data?.key);
+    if (mainWindow) mainWindow.webContents.send("eqSettingsChanged", data);
+    return ok;
+  } catch (error) {
+    console.error("Error in deleteEqSetting:", error);
     return false;
   }
 });

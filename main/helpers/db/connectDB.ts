@@ -1,5 +1,5 @@
 import { and, eq, like, sql, or, exists, isNotNull } from "drizzle-orm";
-import { albums, songs, settings, playlistSongs, playlists } from "./schema";
+import { albums, songs, settings, playlistSongs, playlists, eqSettings } from "./schema";
 import fs from "fs";
 import { parseFile, selectCover } from "music-metadata";
 import path from "path";
@@ -1291,4 +1291,80 @@ export const getLastFmSettings = async () => {
       scrobbleThreshold: 50,
     };
   }
+};
+
+// ---- Equalizer (per-track / per-album) ----
+
+// Get one stored curve (parsed) for a scope+key, or null.
+export const getEqSetting = async (scope: string, key: string) => {
+  try {
+    const row = await db
+      .select({ curve: eqSettings.curve })
+      .from(eqSettings)
+      .where(and(eq(eqSettings.scope, scope), eq(eqSettings.key, key)))
+      .limit(1);
+    if (row.length === 0) return null;
+    try {
+      return JSON.parse(row[0].curve);
+    } catch {
+      return null;
+    }
+  } catch (error) {
+    console.error("Error getting EQ setting:", error);
+    return null;
+  }
+};
+
+// Upsert a curve for scope+key.
+export const setEqSetting = async (
+  scope: string,
+  key: string,
+  curve: unknown,
+) => {
+  try {
+    const json = JSON.stringify(curve);
+    const existing = await db
+      .select({ id: eqSettings.id })
+      .from(eqSettings)
+      .where(and(eq(eqSettings.scope, scope), eq(eqSettings.key, key)))
+      .limit(1);
+    if (existing.length === 0) {
+      await db.insert(eqSettings).values({ scope, key, curve: json });
+    } else {
+      await db
+        .update(eqSettings)
+        .set({ curve: json })
+        .where(eq(eqSettings.id, existing[0].id));
+    }
+    return true;
+  } catch (error) {
+    console.error("Error setting EQ setting:", error);
+    return false;
+  }
+};
+
+// Delete a stored curve for scope+key.
+export const deleteEqSetting = async (scope: string, key: string) => {
+  try {
+    await db
+      .delete(eqSettings)
+      .where(and(eq(eqSettings.scope, scope), eq(eqSettings.key, key)));
+    return true;
+  } catch (error) {
+    console.error("Error deleting EQ setting:", error);
+    return false;
+  }
+};
+
+// Resolve the effective curve for a song: track override > album default > none.
+export const resolveEq = async (trackId: number, albumKey: string) => {
+  const track =
+    trackId != null ? await getEqSetting("track", String(trackId)) : null;
+  if (track && track.enabled) return { curve: track, source: "track" };
+  const album =
+    albumKey != null && albumKey !== ""
+      ? await getEqSetting("album", albumKey)
+      : null;
+  if (album && album.enabled) return { curve: album, source: "album" };
+  return { curve: null, source: "none" };
 };

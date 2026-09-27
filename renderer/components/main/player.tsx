@@ -49,6 +49,7 @@ import {
   useAudioMetadata,
 } from "@/lib/helpers";
 import { Song, usePlayer } from "@/context/playerContext";
+import { attachHowl, applyCurve } from "@/lib/eq";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -595,6 +596,25 @@ export const Player = () => {
     [],
   );
 
+  // Equalizer: resolve the effective curve (track > album > none) and apply it live.
+  const applyResolvedEq = useCallback((s: Song | null) => {
+    if (!s) {
+      applyCurve(null);
+      return;
+    }
+    const albumKey = String(s.album?.id ?? s.album?.name ?? "");
+    window.ipc
+      .invoke("resolveEq", { trackId: s.id, albumKey })
+      .then((res: any) => applyCurve(res?.curve || null))
+      .catch(() => {});
+  }, []);
+
+  // Re-apply EQ when a curve is saved/removed elsewhere (e.g. the Equalizer page)
+  useEffect(() => {
+    const remove = window.ipc.on("eqSettingsChanged", () => applyResolvedEq(song));
+    return remove;
+  }, [song, applyResolvedEq]);
+
   const handleSongSelect = useCallback((selectedSong: Song) => {
     // Find the song in the current queue and jump to it
     const songIndex = queue.findIndex(song => song.id === selectedSong.id);
@@ -738,6 +758,13 @@ export const Player = () => {
         setIsPlaying(true);
         updateDiscordState(1, song);
         window.ipc.send("update-window", [true, song?.artist, song?.name]);
+        // Wire the EQ graph to this track's audio element and apply its curve.
+        try {
+          attachHowl(sound);
+          applyResolvedEq(song);
+        } catch (e) {
+          console.warn("[eq] attach failed:", e);
+        }
       },
       onloaderror: (error) => {
         console.error("Error loading audio:", error);

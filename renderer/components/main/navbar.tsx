@@ -9,6 +9,7 @@ import {
   IconVinyl,
   IconUser,
   IconArrowLeft,
+  IconAdjustmentsHorizontal,
 } from "@tabler/icons-react";
 import {
   Tooltip,
@@ -106,6 +107,11 @@ const Navbar = () => {
       href: "/artists",
       icon: <IconUser stroke={2} size={20} />,
       label: "Artists",
+    },
+    {
+      href: "/equalizer",
+      icon: <IconAdjustmentsHorizontal stroke={2} size={20} />,
+      label: "Equalizer",
     },
   ];
 

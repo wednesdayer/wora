@@ -67,3 +67,12 @@ export const playlistSongRelations = relations(playlistSongs, ({ one }) => ({
   }),
   song: one(songs, { fields: [playlistSongs.songId], references: [songs.id] }),
 }));
+
+// Per-track / per-album equalizer curves.
+// scope: "track" | "album"; key: trackId or albumKey (string); curve: JSON string.
+export const eqSettings = sqliteTable("eqSettings", {
+  id: integer("id", { mode: "number" }).primaryKey({ autoIncrement: true }),
+  scope: text("scope").notNull(),
+  key: text("key").notNull(),
+  curve: text("curve").notNull(),
+});

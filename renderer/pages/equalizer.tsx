@@ -1,0 +1,279 @@
+import React, { useCallback, useEffect, useState } from "react";
+import { IconAdjustmentsHorizontal, IconCheck, IconX } from "@tabler/icons-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { usePlayer } from "@/context/playerContext";
+import {
+  EQ_FREQS,
+  EqCurve,
+  applyCurve,
+  flatCurve,
+} from "@/lib/eq";
+
+type Scope = "track" | "album";
+
+const NotificationToast = ({
+  success,
+  message,
+}: {
+  success: boolean;
+  message: string;
+}) => (
+  <div className="flex w-fit items-center gap-2 text-xs">
+    {success ? (
+      <IconCheck className="text-green-400" stroke={2} size={16} />
+    ) : (
+      <IconX className="text-red-500" stroke={2} size={16} />
+    )}
+    {message}
+  </div>
+);
+
+function normalizeCurve(raw: any): EqCurve {
+  const base = flatCurve();
+  if (!raw || typeof raw !== "object") return base;
+  const bands = Array.isArray(raw.bands) ? raw.bands : base.bands;
+  return {
+    enabled: raw.enabled !== false,
+    preamp: typeof raw.preamp === "number" ? raw.preamp : 0,
+    bands: EQ_FREQS.map((_, i) =>
+      typeof bands[i] === "number" ? bands[i] : 0,
+    ),
+  };
+}
+
+function freqLabel(hz: number): string {
+  return hz >= 1000 ? `${hz / 1000}k` : `${hz}`;
+}
+
+export default function EqualizerPage() {
+  const { song } = usePlayer();
+  const [scope, setScope] = useState<Scope>("track");
+  const [curve, setCurve] = useState<EqCurve>(flatCurve());
+
+  const albumKey = String(song?.album?.id ?? song?.album?.name ?? "");
+  const storageKey = scope === "track" ? String(song?.id ?? "") : albumKey;
+
+  // Load the stored curve for the current song + scope.
+  useEffect(() => {
+    let cancelled = false;
+    if (!song) {
+      setCurve(flatCurve());
+      return;
+    }
+    window.ipc
+      .invoke("getEqSetting", { scope, key: storageKey })
+      .then((stored: any) => {
+        if (cancelled) return;
+        const c = stored ? normalizeCurve(stored) : flatCurve();
+        setCurve(c);
+        applyCurve(c); // preview what we're editing
+      })
+      .catch(() => {
+        if (!cancelled) setCurve(flatCurve());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [song, scope, storageKey]);
+
+  // Restore the truly effective curve when leaving the page.
+  useEffect(() => {
+    return () => {
+      if (!song) {
+        applyCurve(null);
+        return;
+      }
+      window.ipc
+        .invoke("resolveEq", { trackId: song.id, albumKey })
+        .then((res: any) => applyCurve(res?.curve || null))
+        .catch(() => {});
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [song, albumKey]);
+
+  const commitLive = useCallback((next: EqCurve) => {
+    setCurve(next);
+    applyCurve(next);
+  }, []);
+
+  const setBand = (i: number, value: number) => {
+    commitLive({
+      ...curve,
+      bands: curve.bands.map((b, idx) => (idx === i ? value : b)),
+    });
+  };
+
+  const setPreamp = (value: number) => commitLive({ ...curve, preamp: value });
+  const setEnabled = (value: boolean) =>
+    commitLive({ ...curve, enabled: value });
+
+  const handleReset = () => commitLive(flatCurve());
+
+  const handleSave = () => {
+    if (!song || !storageKey) return;
+    window.ipc
+      .invoke("setEqSetting", { scope, key: storageKey, curve })
+      .then((ok: boolean) =>
+        toast(
+          <NotificationToast
+            success={ok}
+            message={
+              ok
+                ? scope === "track"
+                  ? "EQ saved for this track"
+                  : "EQ saved for this album"
+                : "Failed to save EQ"
+            }
+          />,
+        ),
+      );
+  };
+
+  const handleRemove = () => {
+    if (!song || !storageKey) return;
+    window.ipc
+      .invoke("deleteEqSetting", { scope, key: storageKey })
+      .then((ok: boolean) => {
+        commitLive(flatCurve());
+        toast(
+          <NotificationToast
+            success={ok}
+            message={ok ? "EQ removed" : "Failed to remove EQ"}
+          />,
+        );
+      });
+  };
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="flex items-center gap-3">
+        <IconAdjustmentsHorizontal stroke={2} size={26} />
+        <div>
+          <h1 className="text-lg font-medium">Equalizer</h1>
+          <p className="opacity-50">
+            Per-track and per-album EQ — a track overrides its album default.
+          </p>
+        </div>
+      </div>
+
+      {!song ? (
+        <div className="wora-border flex h-40 items-center justify-center rounded-2xl bg-white/70 text-sm opacity-50 dark:bg-black/70">
+          Play a track to edit its equalizer.
+        </div>
+      ) : (
+        <div className="wora-border flex flex-col gap-6 rounded-2xl bg-white/70 p-6 dark:bg-black/70">
+          {/* Now playing + target */}
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium">{song.name}</p>
+              <p className="truncate opacity-50">
+                {song.artist} — {song.album?.name}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="opacity-50">Apply to:</span>
+              <div className="flex overflow-hidden rounded-lg border border-black/10 dark:border-white/10">
+                {(["track", "album"] as Scope[]).map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => setScope(s)}
+                    className={`px-3 py-1.5 text-xs capitalize transition ${
+                      scope === s
+                        ? "bg-black text-white dark:bg-white dark:text-black"
+                        : "opacity-60 hover:opacity-100"
+                    }`}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Enable */}
+          <label className="flex w-fit cursor-pointer items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={curve.enabled}
+              onChange={(e) => setEnabled(e.target.checked)}
+            />
+            Enabled
+          </label>
+
+          {/* Bands */}
+          <div className="flex items-end gap-4 overflow-x-auto pb-2">
+            {/* Preamp */}
+            <BandSlider
+              label="Pre"
+              value={curve.preamp}
+              onChange={setPreamp}
+            />
+            <div className="mx-1 h-40 w-px self-center bg-black/10 dark:bg-white/10" />
+            {EQ_FREQS.map((f, i) => (
+              <BandSlider
+                key={f}
+                label={freqLabel(f)}
+                value={curve.bands[i]}
+                onChange={(v) => setBand(i, v)}
+              />
+            ))}
+          </div>
+
+          {/* Actions */}
+          <div className="flex items-center gap-3">
+            <Button onClick={handleSave}>Save</Button>
+            <Button variant="ghost" onClick={handleReset}>
+              Reset
+            </Button>
+            <Button variant="ghost" onClick={handleRemove}>
+              Remove {scope} EQ
+            </Button>
+            <p className="ml-auto text-xs opacity-40">
+              Changes preview live. Save to keep them.
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BandSlider({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div className="flex w-10 flex-col items-center gap-2">
+      <span className="tabular-nums text-[10px] opacity-70">
+        {value > 0 ? "+" : ""}
+        {value.toFixed(1)}
+      </span>
+      <input
+        type="range"
+        min={-12}
+        max={12}
+        step={0.5}
+        value={value}
+        onChange={(e) => onChange(parseFloat(e.target.value))}
+        // Vertical range slider (Chromium / Electron)
+        style={
+          {
+            WebkitAppearance: "slider-vertical",
+            writingMode: "vertical-lr",
+            direction: "rtl",
+            width: "24px",
+            height: "150px",
+          } as React.CSSProperties
+        }
+        className="cursor-pointer"
+      />
+      <span className="text-[10px] opacity-50">{label}</span>
+    </div>
+  );
+}

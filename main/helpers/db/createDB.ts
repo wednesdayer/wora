@@ -42,5 +42,12 @@ export const initDatabase = async () => {
         FOREIGN KEY (playlistId) REFERENCES playlists(id),
         Foreign KEY (songId) REFERENCES songs(id)
       );
+      CREATE TABLE IF NOT EXISTS eqSettings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        scope TEXT NOT NULL,
+        key TEXT NOT NULL,
+        curve TEXT NOT NULL,
+        UNIQUE(scope, key)
+      );
   `);
 };
