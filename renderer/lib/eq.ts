@@ -31,6 +31,62 @@ let preampNode: GainNode | null = null;
 let attachedEl: HTMLMediaElement | null = null;
 let lastCurve: EqCurve | null = null;
 
+// --- Tempo Control state (global playback params) ---
+let pitchNode: AudioWorkletNode | null = null;
+let pitchReady = false; // worklet module loaded
+let pitchLoading = false;
+let pitchSemitones = 0; // independent pitch shift
+let tempoRate = 1; // element playbackRate (play speed * sample rate)
+let tempoPreserve = true; // preservesPitch (false = varispeed / sample-rate)
+
+function ensureWorklet(c: AudioContext): void {
+  if (pitchReady || pitchLoading || !c.audioWorklet) return;
+  pitchLoading = true;
+  c.audioWorklet
+    .addModule("/pitch-processor.js")
+    .then(() => {
+      pitchReady = true;
+      pitchLoading = false;
+      insertPitchNode(); // splice into the live graph if a track is attached
+    })
+    .catch((e) => {
+      pitchLoading = false;
+      console.warn("[tempo] pitch worklet failed to load:", e);
+    });
+}
+
+// Insert the pitch node between source and filters on the existing graph
+// (reuses the single MediaElementSource — never creates a second one).
+function insertPitchNode(): void {
+  if (!ctx || !pitchReady || pitchNode || !mediaSource || filters.length === 0)
+    return;
+  try {
+    pitchNode = new AudioWorkletNode(ctx, "pitch-processor");
+    mediaSource.disconnect();
+    mediaSource.connect(pitchNode);
+    pitchNode.connect(filters[0]);
+    applyPitchRatio();
+  } catch (e) {
+    console.warn("[tempo] could not create pitch node:", e);
+    pitchNode = null;
+  }
+}
+
+function applyPitchRatio(): void {
+  if (!pitchNode) return;
+  const ratio = Math.pow(2, pitchSemitones / 12);
+  pitchNode.port.postMessage({ pitchRatio: ratio });
+}
+
+function applyTempoToElement(): void {
+  if (!attachedEl) return;
+  try {
+    attachedEl.playbackRate = tempoRate;
+    (attachedEl as any).preservesPitch = tempoPreserve;
+    (attachedEl as any).webkitPreservesPitch = tempoPreserve;
+  } catch {}
+}
+
 function ensureContext(): AudioContext | null {
   if (typeof window === "undefined") return null;
   if (!ctx) {
@@ -56,6 +112,10 @@ export function attachElement(el: HTMLMediaElement | null | undefined): void {
   try {
     if (mediaSource) mediaSource.disconnect();
   } catch {}
+  try {
+    if (pitchNode) pitchNode.disconnect();
+  } catch {}
+  pitchNode = null;
   filters.forEach((f) => {
     try {
       f.disconnect();
@@ -89,7 +149,13 @@ export function attachElement(el: HTMLMediaElement | null | undefined): void {
   preampNode = c.createGain();
   preampNode.gain.value = 1;
 
+  // Chain: source -> [pitch] -> filters -> preamp -> destination
+  pitchNode = pitchReady ? new AudioWorkletNode(c, "pitch-processor") : null;
   let prev: AudioNode = mediaSource;
+  if (pitchNode) {
+    prev.connect(pitchNode);
+    prev = pitchNode;
+  }
   for (const f of filters) {
     prev.connect(f);
     prev = f;
@@ -99,7 +165,10 @@ export function attachElement(el: HTMLMediaElement | null | undefined): void {
 
   attachedEl = el;
   void c.resume?.();
+  ensureWorklet(c); // load pitch worklet (splices in later if not ready yet)
   applyCurve(lastCurve);
+  applyTempoToElement();
+  applyPitchRatio();
 }
 
 // Reach the underlying <audio> element from a howler Howl instance.
@@ -128,4 +197,30 @@ export function applyCurve(curve: EqCurve | null | undefined): void {
 
 export function isReady(): boolean {
   return filters.length > 0;
+}
+
+// ---- Tempo Control API ----
+
+// Play speed / sample rate map to the element's playbackRate.
+// preservePitch=true  -> time-stretch (play speed, pitch kept)
+// preservePitch=false -> varispeed (sample-rate feel: pitch+tempo together)
+export function setPlaybackRate(rate: number, preservePitch: boolean): void {
+  tempoRate = Math.max(0.25, Math.min(4, rate || 1));
+  tempoPreserve = preservePitch;
+  applyTempoToElement();
+}
+
+// Independent pitch shift in semitones (tempo unchanged).
+export function setPitchSemitones(semitones: number): void {
+  pitchSemitones = Math.max(-12, Math.min(12, semitones || 0));
+  const c = ensureContext();
+  if (c) {
+    if (!pitchReady) ensureWorklet(c);
+    else if (!pitchNode) insertPitchNode();
+  }
+  applyPitchRatio();
+}
+
+export function getTempoState() {
+  return { rate: tempoRate, preservePitch: tempoPreserve, pitchSemitones };
 }

@@ -50,6 +50,7 @@ import {
 } from "@/lib/helpers";
 import { Song, usePlayer } from "@/context/playerContext";
 import { attachHowl, applyCurve } from "@/lib/eq";
+import { loadTempo, applyTempo } from "@/components/main/tempo-control";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -842,6 +843,7 @@ export const Player = () => {
         try {
           attachHowl(sound);
           applyResolvedEq(song);
+          applyTempo(loadTempo()); // re-apply persisted tempo/pitch to the new track
         } catch (e) {
           console.warn("[eq] attach failed:", e);
         }

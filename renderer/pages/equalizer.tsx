@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { usePlayer } from "@/context/playerContext";
 import { EQ_FREQS, EqCurve, applyCurve, flatCurve } from "@/lib/eq";
+import TempoControl from "@/components/main/tempo-control";
 
 type Scope = "track" | "album";
 
@@ -47,6 +48,7 @@ function freqLabel(hz: number): string {
 
 export default function EqualizerPage() {
   const { song } = usePlayer();
+  const [view, setView] = useState<"eq" | "tempo">("eq");
   const [scope, setScope] = useState<Scope>("track");
   const [curve, setCurve] = useState<EqCurve>(flatCurve());
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -230,7 +232,26 @@ export default function EqualizerPage() {
         </div>
       </div>
 
-      {!song ? (
+      {/* Tabs: Equalizer | Tempo Control */}
+      <div className="flex w-fit overflow-hidden rounded-lg border border-black/10 dark:border-white/10">
+        {(["eq", "tempo"] as const).map((v) => (
+          <button
+            key={v}
+            onClick={() => setView(v)}
+            className={`px-4 py-1.5 text-xs transition ${
+              view === v
+                ? "bg-black text-white dark:bg-white dark:text-black"
+                : "opacity-60 hover:opacity-100"
+            }`}
+          >
+            {v === "eq" ? "Equalizer" : "Tempo Control"}
+          </button>
+        ))}
+      </div>
+
+      {view === "tempo" ? (
+        <TempoControl />
+      ) : !song ? (
         <div className="wora-border flex h-40 items-center justify-center rounded-2xl bg-white/70 text-sm opacity-50 dark:bg-black/70">
           Play a track to edit its equalizer.
         </div>
