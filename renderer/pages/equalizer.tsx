@@ -52,8 +52,26 @@ export default function EqualizerPage() {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [savedFlash, setSavedFlash] = useState(false);
 
+  // Device layer: each named device keeps its own set of track/album curves.
+  const [devices, setDevices] = useState<string[]>(["Default"]);
+  const [device, setDevice] = useState<string>("Default");
+  const [newDeviceName, setNewDeviceName] = useState("");
+
   const albumKey = String(song?.album?.id ?? song?.album?.name ?? "");
   const storageKey = scope === "track" ? String(song?.id ?? "") : albumKey;
+
+  // Load device list + the active device once.
+  useEffect(() => {
+    Promise.all([
+      window.ipc.invoke("getEqDevices"),
+      window.ipc.invoke("getActiveEqDevice"),
+    ])
+      .then(([devs, active]: [string[], string]) => {
+        setDevices(Array.isArray(devs) && devs.length ? devs : ["Default"]);
+        setDevice(active || "Default");
+      })
+      .catch(() => {});
+  }, []);
 
   // Load the stored curve for the current song + scope.
   useEffect(() => {
@@ -63,7 +81,7 @@ export default function EqualizerPage() {
       return;
     }
     window.ipc
-      .invoke("getEqSetting", { scope, key: storageKey })
+      .invoke("getEqSetting", { device, scope, key: storageKey })
       .then((stored: any) => {
         if (cancelled) return;
         const c = stored ? normalizeCurve(stored) : flatCurve();
@@ -76,7 +94,7 @@ export default function EqualizerPage() {
     return () => {
       cancelled = true;
     };
-  }, [song, scope, storageKey]);
+  }, [song, scope, storageKey, device]);
 
   // Restore the truly effective curve when leaving the page.
   useEffect(() => {
@@ -86,12 +104,12 @@ export default function EqualizerPage() {
         return;
       }
       window.ipc
-        .invoke("resolveEq", { trackId: song.id, albumKey })
+        .invoke("resolveEq", { device, trackId: song.id, albumKey })
         .then((res: any) => applyCurve(res?.curve || null))
         .catch(() => {});
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [song, albumKey]);
+  }, [song, albumKey, device]);
 
   // Debounced auto-save: persists the curve for the current target without a Save button.
   const persist = useCallback(
@@ -100,7 +118,12 @@ export default function EqualizerPage() {
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
         window.ipc
-          .invoke("setEqSetting", { scope, key: storageKey, curve: next })
+          .invoke("setEqSetting", {
+            device,
+            scope,
+            key: storageKey,
+            curve: next,
+          })
           .then(() => {
             setSavedFlash(true);
             setTimeout(() => setSavedFlash(false), 1200);
@@ -108,7 +131,7 @@ export default function EqualizerPage() {
           .catch(() => {});
       }, 350);
     },
-    [song, storageKey, scope],
+    [song, storageKey, scope, device],
   );
 
   // Apply live AND auto-save (used for every user edit).
@@ -138,7 +161,7 @@ export default function EqualizerPage() {
     if (!song || !storageKey) return;
     if (saveTimer.current) clearTimeout(saveTimer.current); // don't re-create the row
     window.ipc
-      .invoke("deleteEqSetting", { scope, key: storageKey })
+      .invoke("deleteEqSetting", { device, scope, key: storageKey })
       .then((ok: boolean) => {
         const f = flatCurve();
         setCurve(f);
@@ -152,6 +175,48 @@ export default function EqualizerPage() {
       });
   };
 
+  // ---- Device management ----
+  const changeDevice = (name: string) => {
+    setDevice(name);
+    window.ipc.invoke("setActiveEqDevice", { name }).catch(() => {});
+  };
+
+  const addDevice = () => {
+    const n = newDeviceName.trim();
+    if (!n) return;
+    window.ipc
+      .invoke("addEqDevice", { name: n })
+      .then(() => {
+        setDevices((d) => (d.includes(n) ? d : [...d, n]));
+        setNewDeviceName("");
+        changeDevice(n);
+        toast(
+          <NotificationToast success={true} message={`Device "${n}" added`} />,
+        );
+      })
+      .catch(() => {});
+  };
+
+  const removeDevice = () => {
+    if (device === "Default") return;
+    const target = device;
+    window.ipc
+      .invoke("deleteEqDevice", { name: target })
+      .then((ok: boolean) => {
+        if (ok) {
+          setDevices((d) => d.filter((x) => x !== target));
+          changeDevice("Default");
+          toast(
+            <NotificationToast
+              success={true}
+              message={`Device "${target}" removed`}
+            />,
+          );
+        }
+      })
+      .catch(() => {});
+  };
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center gap-3">
@@ -159,7 +224,8 @@ export default function EqualizerPage() {
         <div>
           <h1 className="text-lg font-medium">Equalizer</h1>
           <p className="opacity-50">
-            Per-track and per-album EQ — a track overrides its album default.
+            Per-device EQ — each device has its own curves; a track overrides
+            its album default.
           </p>
         </div>
       </div>
@@ -170,6 +236,39 @@ export default function EqualizerPage() {
         </div>
       ) : (
         <div className="wora-border flex flex-col gap-6 rounded-2xl bg-white/70 p-6 dark:bg-black/70">
+          {/* Device selector */}
+          <div className="flex flex-wrap items-center gap-2 border-b border-black/5 pb-4 dark:border-white/5">
+            <span className="opacity-50">Device:</span>
+            <select
+              value={device}
+              onChange={(e) => changeDevice(e.target.value)}
+              className="rounded-md border border-black/10 bg-transparent px-2 py-1 text-xs dark:border-white/10"
+            >
+              {devices.map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
+            {device !== "Default" && (
+              <Button variant="ghost" onClick={removeDevice}>
+                Delete device
+              </Button>
+            )}
+            <div className="ml-auto flex items-center gap-2">
+              <input
+                value={newDeviceName}
+                onChange={(e) => setNewDeviceName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addDevice()}
+                placeholder="new device (e.g. Headphones)"
+                className="w-48 rounded-md border border-black/10 bg-transparent px-2 py-1 text-xs dark:border-white/10"
+              />
+              <Button variant="ghost" onClick={addDevice}>
+                Add device
+              </Button>
+            </div>
+          </div>
+
           {/* Now playing + target */}
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="min-w-0">

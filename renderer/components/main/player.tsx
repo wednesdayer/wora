@@ -646,7 +646,10 @@ export const Player = () => {
     [],
   );
 
-  // Equalizer: resolve the effective curve (track > album > none) and apply it live.
+  // Active EQ device (its own set of per-track/album curves).
+  const activeEqDevice = useRef<string>("Default");
+
+  // Equalizer: resolve the effective curve (device -> track > album > none) live.
   const applyResolvedEq = useCallback((s: Song | null) => {
     if (!s) {
       applyCurve(null);
@@ -654,10 +657,30 @@ export const Player = () => {
     }
     const albumKey = String(s.album?.id ?? s.album?.name ?? "");
     window.ipc
-      .invoke("resolveEq", { trackId: s.id, albumKey })
+      .invoke("resolveEq", {
+        device: activeEqDevice.current,
+        trackId: s.id,
+        albumKey,
+      })
       .then((res: any) => applyCurve(res?.curve || null))
       .catch(() => {});
   }, []);
+
+  // Load the active device once, and track changes to it.
+  useEffect(() => {
+    window.ipc
+      .invoke("getActiveEqDevice")
+      .then((d: string) => {
+        activeEqDevice.current = d || "Default";
+        applyResolvedEq(song);
+      })
+      .catch(() => {});
+    const remove = window.ipc.on("eqDeviceChanged", (name: string) => {
+      activeEqDevice.current = name || "Default";
+      applyResolvedEq(song);
+    });
+    return remove;
+  }, [song, applyResolvedEq]);
 
   // Re-apply EQ when a curve is saved/removed elsewhere (e.g. the Equalizer page)
   useEffect(() => {

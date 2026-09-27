@@ -34,6 +34,11 @@ import {
   setEqSetting,
   deleteEqSetting,
   resolveEq,
+  getEqDevices,
+  addEqDevice,
+  deleteEqDevice,
+  getActiveEqDevice,
+  setActiveEqDevice,
 } from "./helpers/db/connectDB";
 import { initDatabase } from "./helpers/db/createDB";
 import { parseFile } from "music-metadata";
@@ -599,30 +604,35 @@ ipcMain.handle("updateLastFmSettings", async (_, data) => {
 
 // ---- Equalizer (per-track / per-album) handlers ----
 
-// Resolve effective curve for a song (track override > album default > none)
+// Resolve effective curve for a song on a device (track > album > none)
 ipcMain.handle("resolveEq", async (_, data) => {
   try {
-    return await resolveEq(data?.trackId, data?.albumKey);
+    return await resolveEq(data?.device, data?.trackId, data?.albumKey);
   } catch (error) {
     console.error("Error in resolveEq:", error);
     return { curve: null, source: "none" };
   }
 });
 
-// Get a stored curve for scope+key
+// Get a stored curve for device+scope+key
 ipcMain.handle("getEqSetting", async (_, data) => {
   try {
-    return await getEqSetting(data?.scope, data?.key);
+    return await getEqSetting(data?.device, data?.scope, data?.key);
   } catch (error) {
     console.error("Error in getEqSetting:", error);
     return null;
   }
 });
 
-// Save/update a curve for scope+key
+// Save/update a curve for device+scope+key
 ipcMain.handle("setEqSetting", async (_, data) => {
   try {
-    const ok = await setEqSetting(data?.scope, data?.key, data?.curve);
+    const ok = await setEqSetting(
+      data?.device,
+      data?.scope,
+      data?.key,
+      data?.curve,
+    );
     if (mainWindow) mainWindow.webContents.send("eqSettingsChanged", data);
     return ok;
   } catch (error) {
@@ -631,14 +641,64 @@ ipcMain.handle("setEqSetting", async (_, data) => {
   }
 });
 
-// Remove a curve for scope+key
+// Remove a curve for device+scope+key
 ipcMain.handle("deleteEqSetting", async (_, data) => {
   try {
-    const ok = await deleteEqSetting(data?.scope, data?.key);
+    const ok = await deleteEqSetting(data?.device, data?.scope, data?.key);
     if (mainWindow) mainWindow.webContents.send("eqSettingsChanged", data);
     return ok;
   } catch (error) {
     console.error("Error in deleteEqSetting:", error);
+    return false;
+  }
+});
+
+// ---- EQ devices ----
+ipcMain.handle("getEqDevices", async () => {
+  try {
+    return await getEqDevices();
+  } catch (error) {
+    console.error("Error in getEqDevices:", error);
+    return ["Default"];
+  }
+});
+
+ipcMain.handle("getActiveEqDevice", async () => {
+  try {
+    return await getActiveEqDevice();
+  } catch (error) {
+    console.error("Error in getActiveEqDevice:", error);
+    return "Default";
+  }
+});
+
+ipcMain.handle("setActiveEqDevice", async (_, data) => {
+  try {
+    const ok = await setActiveEqDevice(data?.name);
+    if (mainWindow) mainWindow.webContents.send("eqDeviceChanged", data?.name);
+    return ok;
+  } catch (error) {
+    console.error("Error in setActiveEqDevice:", error);
+    return false;
+  }
+});
+
+ipcMain.handle("addEqDevice", async (_, data) => {
+  try {
+    return await addEqDevice(data?.name);
+  } catch (error) {
+    console.error("Error in addEqDevice:", error);
+    return false;
+  }
+});
+
+ipcMain.handle("deleteEqDevice", async (_, data) => {
+  try {
+    const ok = await deleteEqDevice(data?.name);
+    if (mainWindow) mainWindow.webContents.send("eqDeviceChanged", null);
+    return ok;
+  } catch (error) {
+    console.error("Error in deleteEqDevice:", error);
     return false;
   }
 });
