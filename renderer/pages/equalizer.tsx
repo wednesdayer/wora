@@ -1,14 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { IconAdjustmentsHorizontal, IconCheck, IconX } from "@tabler/icons-react";
+import {
+  IconAdjustmentsHorizontal,
+  IconCheck,
+  IconX,
+} from "@tabler/icons-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { usePlayer } from "@/context/playerContext";
-import {
-  EQ_FREQS,
-  EqCurve,
-  applyCurve,
-  flatCurve,
-} from "@/lib/eq";
+import { EQ_FREQS, EqCurve, applyCurve, flatCurve } from "@/lib/eq";
 
 type Scope = "track" | "album";
 
@@ -212,11 +211,7 @@ export default function EqualizerPage() {
           {/* Bands */}
           <div className="flex items-end gap-4 overflow-x-auto pb-2">
             {/* Preamp */}
-            <BandSlider
-              label="Pre"
-              value={curve.preamp}
-              onChange={setPreamp}
-            />
+            <BandSlider label="Pre" value={curve.preamp} onChange={setPreamp} />
             <div className="mx-1 h-40 w-px self-center bg-black/10 dark:bg-white/10" />
             {EQ_FREQS.map((f, i) => (
               <BandSlider
@@ -264,7 +259,7 @@ function BandSlider({
 }) {
   return (
     <div className="flex w-10 flex-col items-center gap-2">
-      <span className="tabular-nums text-[10px] opacity-70">
+      <span className="text-[10px] tabular-nums opacity-70">
         {value > 0 ? "+" : ""}
         {value.toFixed(1)}
       </span>

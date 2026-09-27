@@ -1,5 +1,12 @@
 import { and, eq, like, sql, or, exists, isNotNull } from "drizzle-orm";
-import { albums, songs, settings, playlistSongs, playlists, eqSettings } from "./schema";
+import {
+  albums,
+  songs,
+  settings,
+  playlistSongs,
+  playlists,
+  eqSettings,
+} from "./schema";
 import fs from "fs";
 import { parseFile, selectCover } from "music-metadata";
 import path from "path";

@@ -12,9 +12,7 @@ export interface EqCurve {
   bands: number[]; // gain in dB per band (same length/order as EQ_FREQS)
 }
 
-export const EQ_FREQS = [
-  32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000,
-];
+export const EQ_FREQS = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 
 export function flatCurve(): EqCurve {
   return { enabled: true, preamp: 0, bands: EQ_FREQS.map(() => 0) };
