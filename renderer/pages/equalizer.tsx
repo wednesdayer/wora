@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { IconAdjustmentsHorizontal, IconCheck, IconX } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -50,6 +50,8 @@ export default function EqualizerPage() {
   const { song } = usePlayer();
   const [scope, setScope] = useState<Scope>("track");
   const [curve, setCurve] = useState<EqCurve>(flatCurve());
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [savedFlash, setSavedFlash] = useState(false);
 
   const albumKey = String(song?.album?.id ?? song?.album?.name ?? "");
   const storageKey = scope === "track" ? String(song?.id ?? "") : albumKey;
@@ -92,10 +94,33 @@ export default function EqualizerPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [song, albumKey]);
 
-  const commitLive = useCallback((next: EqCurve) => {
-    setCurve(next);
-    applyCurve(next);
-  }, []);
+  // Debounced auto-save: persists the curve for the current target without a Save button.
+  const persist = useCallback(
+    (next: EqCurve) => {
+      if (!song || !storageKey) return;
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(() => {
+        window.ipc
+          .invoke("setEqSetting", { scope, key: storageKey, curve: next })
+          .then(() => {
+            setSavedFlash(true);
+            setTimeout(() => setSavedFlash(false), 1200);
+          })
+          .catch(() => {});
+      }, 350);
+    },
+    [song, storageKey, scope],
+  );
+
+  // Apply live AND auto-save (used for every user edit).
+  const commitLive = useCallback(
+    (next: EqCurve) => {
+      setCurve(next);
+      applyCurve(next);
+      persist(next);
+    },
+    [persist],
+  );
 
   const setBand = (i: number, value: number) => {
     commitLive({
@@ -110,32 +135,15 @@ export default function EqualizerPage() {
 
   const handleReset = () => commitLive(flatCurve());
 
-  const handleSave = () => {
-    if (!song || !storageKey) return;
-    window.ipc
-      .invoke("setEqSetting", { scope, key: storageKey, curve })
-      .then((ok: boolean) =>
-        toast(
-          <NotificationToast
-            success={ok}
-            message={
-              ok
-                ? scope === "track"
-                  ? "EQ saved for this track"
-                  : "EQ saved for this album"
-                : "Failed to save EQ"
-            }
-          />,
-        ),
-      );
-  };
-
   const handleRemove = () => {
     if (!song || !storageKey) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current); // don't re-create the row
     window.ipc
       .invoke("deleteEqSetting", { scope, key: storageKey })
       .then((ok: boolean) => {
-        commitLive(flatCurve());
+        const f = flatCurve();
+        setCurve(f);
+        applyCurve(f);
         toast(
           <NotificationToast
             success={ok}
@@ -222,15 +230,21 @@ export default function EqualizerPage() {
 
           {/* Actions */}
           <div className="flex items-center gap-3">
-            <Button onClick={handleSave}>Save</Button>
             <Button variant="ghost" onClick={handleReset}>
               Reset
             </Button>
             <Button variant="ghost" onClick={handleRemove}>
               Remove {scope} EQ
             </Button>
-            <p className="ml-auto text-xs opacity-40">
-              Changes preview live. Save to keep them.
+            <p className="ml-auto flex items-center gap-1.5 text-xs opacity-50">
+              {savedFlash ? (
+                <>
+                  <IconCheck className="text-green-400" stroke={2} size={14} />
+                  Saved
+                </>
+              ) : (
+                "Applies and saves automatically"
+              )}
             </p>
           </div>
         </div>
